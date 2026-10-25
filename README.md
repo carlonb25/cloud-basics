@@ -4,7 +4,7 @@ An introductory cloud-computing course project for CS-6460 Educational Technolog
 
 ## Use the hosted course
 
-Open the GitHub Pages link, create an account with your email address, and sign in. After account creation, Firebase signs you in automatically and the site opens your dashboard.
+Visit **[Cloud-Computing Concepts, Made Clear](https://carlonb25.github.io/cloud-basics/)** to open the course. Create an account with your email address, and sign in. After account creation, Firebase signs you in automatically and the site opens your dashboard.
 
 Each learner can read and update only their own progress. Do not share your password. Course records can include quiz answers, scores, and written reflections.
 
