@@ -1,6 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
-import { getFirestore, doc, getDoc, setDoc, serverTimestamp, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+import { getFirestore, doc, getDoc, setDoc, serverTimestamp, collection, getDocs, query, orderBy, limit, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
 import { STACK, PRETEST_QUIZ, POSTTEST_QUIZ, QUIZ_VERSION, LESSONS, SCENARIOS, REFLECTION_PROMPTS, CLOUD_LANDSCAPE, COURSE_SOURCES, QUESTION_METHOD } from "./content.js";
 
@@ -9,20 +9,65 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const blank = () => ({ pretest: null, posttest: null, lessons: {}, scenarios: {}, reflection: null });
 const merge = (a, b) => { for (const k in b) { const v = b[k]; a[k] = v && typeof v === "object" && !Array.isArray(v) ? merge(a[k] && typeof a[k] === "object" ? a[k] : {}, v) : v; } return a; };
 
-let app, auth, db, user = null, data = blank(), isAdmin = false;
+let app, auth, db, user = null, data = blank(), isAdmin = false, quizAttempts = [];
 const configured = !firebaseConfig.apiKey.startsWith("YOUR_");
 
 /* ---------- data layer ---------- */
 async function load() {
   const snap = await getDoc(doc(db, "users", user.uid));
   data = merge(blank(), snap.exists() ? snap.data() : {});
-  const adminSnap = await getDoc(doc(db, "admins", user.uid));
+  const [adminSnap, attemptsSnap] = await Promise.all([
+    getDoc(doc(db, "admins", user.uid)),
+    getDocs(query(collection(db, "users", user.uid, "quizAttempts"), orderBy("at", "desc"), limit(100)))
+  ]);
   isAdmin = adminSnap.exists() && adminSnap.data().enabled === true;
+  quizAttempts = attemptsSnap.docs.map(attempt => ({ id: attempt.id, ...attempt.data() }));
 }
 async function save(patch) {
   merge(data, patch);
   try { await setDoc(doc(db, "users", user.uid), { ...patch, email: user.email, updatedAt: serverTimestamp() }, { merge: true }); }
   catch (e) { toast("Your answer could not be saved. Check your connection and try again."); throw e; }
+}
+async function saveQuizAttempt(kind, attempt) {
+  const batch = writeBatch(db);
+  const userRef = doc(db, "users", user.uid);
+  const attemptsRef = collection(db, "users", user.uid, "quizAttempts");
+  const attemptRef = doc(attemptsRef);
+  const migratedAttempts = [];
+
+  if (!data.quizAttemptHistoryMigrated) {
+    for (const testKind of ["pretest", "posttest"]) {
+      const previousAttempts = [
+        ...(Array.isArray(data[`${testKind}History`]) ? data[`${testKind}History`] : []),
+        ...(data[testKind] ? [data[testKind]] : [])
+      ];
+      for (const previous of previousAttempts) {
+        const previousRef = doc(attemptsRef);
+        const savedPrevious = { ...previous, kind: testKind, at: Number(previous.at) || Date.now() };
+        batch.set(previousRef, savedPrevious);
+        migratedAttempts.push({ id: previousRef.id, ...savedPrevious });
+      }
+    }
+  }
+
+  batch.set(attemptRef, { ...attempt, kind });
+  batch.set(userRef, {
+    [kind]: attempt,
+    quizAttemptHistoryMigrated: true,
+    email: user.email,
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+
+  try {
+    await batch.commit();
+  } catch (e) {
+    toast("Your test result could not be saved. Check your connection and Firestore rules, then try again.");
+    throw e;
+  }
+  merge(data, { [kind]: attempt, quizAttemptHistoryMigrated: true });
+  quizAttempts = [...quizAttempts, ...migratedAttempts, { id: attemptRef.id, ...attempt, kind }]
+    .sort((a, b) => Number(b.at || 0) - Number(a.at || 0))
+    .slice(0, 100);
 }
 function toast(msg) { const t = $("#toast") || document.body.appendChild(Object.assign(document.createElement("div"), { id: "toast", role: "status" })); t.textContent = msg; t.hidden = false; setTimeout(() => t.hidden = true, 5000); }
 
@@ -32,6 +77,56 @@ const pct = (n, d) => d ? Math.round(100 * n / d) : 0;
 const score = t => t ? t.score : null;
 const quizFor = kind => kind === "pretest" ? PRETEST_QUIZ : POSTTEST_QUIZ;
 const currentQuiz = t => t?.quizVersion === QUIZ_VERSION;
+function attemptsFor(kind) {
+  if (data.quizAttemptHistoryMigrated) return quizAttempts.filter(attempt => attempt.kind === kind);
+  return [
+    ...(Array.isArray(data[`${kind}History`]) ? data[`${kind}History`] : []),
+    ...(data[kind] ? [data[kind]] : [])
+  ].map(attempt => ({ ...attempt, kind })).sort((a, b) => Number(b.at || 0) - Number(a.at || 0));
+}
+const signedChange = change => `${change > 0 ? "+" : ""}${change}`;
+function attemptSummary(kind) {
+  const attempts = attemptsFor(kind);
+  if (!attempts.length) return kind === "pretest" ? "Ready when you are" : "Take it after practice";
+  const latest = attempts[0];
+  if (attempts.length < 2) return kind === "pretest" ? "Your starting point" : "Your course result";
+  const previous = attempts[1];
+  if (latest.quizVersion !== previous.quizVersion || latest.quizLength !== previous.quizLength) {
+    return "Latest attempt · earlier version kept";
+  }
+  return `Latest attempt · ${signedChange(latest.score - previous.score)} vs. prior`;
+}
+function attemptChangeMessage(kind) {
+  const attempts = attemptsFor(kind);
+  if (attempts.length < 2) return "";
+  const [latest, previous] = attempts;
+  if (latest.quizVersion !== previous.quizVersion || latest.quizLength !== previous.quizLength) {
+    return "Your previous result is saved, but it used a different quiz version and cannot be compared directly.";
+  }
+  const change = latest.score - previous.score;
+  return `Compared with your previous attempt: ${signedChange(change)} question${Math.abs(change) === 1 ? "" : "s"}.`;
+}
+function attemptHistoryHTML() {
+  const grouped = { pretest: attemptsFor("pretest"), posttest: attemptsFor("posttest") };
+  const attempts = [...grouped.pretest, ...grouped.posttest]
+    .sort((a, b) => Number(b.at || 0) - Number(a.at || 0))
+    .slice(0, 20);
+  if (!attempts.length) return "";
+  const counts = { pretest: grouped.pretest.length, posttest: grouped.posttest.length };
+  const rows = attempts.map(attempt => {
+    const sameKind = grouped[attempt.kind];
+    const index = sameKind.indexOf(attempt);
+    const previous = sameKind[index + 1];
+    const comparable = previous
+      && attempt.quizVersion === previous.quizVersion
+      && attempt.quizLength === previous.quizLength;
+    const change = comparable ? `${signedChange(attempt.score - previous.score)} vs. prior` : previous ? "Version changed" : "No prior loaded";
+    const date = attempt.at ? new Date(attempt.at).toLocaleString() : "Date unavailable";
+    const label = attempt.kind === "pretest" ? "Pre-test" : "Post-test";
+    return `<tr><td>${label}</td><td>${esc(date)}</td><td>${esc(attempt.score)} / ${esc(attempt.quizLength || 0)}</td><td>${esc(change)}</td></tr>`;
+  }).join("");
+  return `<section class="dashboard-panel attempt-history"><p class="eyebrow">Assessment history</p><h2>Your attempts</h2><p class="hint">Loaded up to 100 recent attempts: pre-test ${counts.pretest}, post-test ${counts.posttest}. Showing the latest 20 here; all saved attempts are retained.</p><div class="attempt-table-wrap"><table><thead><tr><th scope="col">Test</th><th scope="col">Date</th><th scope="col">Score</th><th scope="col">Change</th></tr></thead><tbody>${rows}</tbody></table></div></section>`;
+}
 const COURSE_TOPICS = [
   { id: "iaas", label: "IaaS", description: "Infrastructure as a Service: rent virtual machines, storage, and networking while managing the operating system and software you install. Examples include Amazon EC2, Azure Virtual Machines, and Google Compute Engine." },
   { id: "paas", label: "PaaS", description: "Platform as a Service: deploy your application while a provider manages the runtime and underlying infrastructure. Examples include Azure App Service, Google App Engine, and AWS Elastic Beanstalk." },
@@ -157,7 +252,7 @@ function dashboardView() {
   const answered = SCENARIOS.filter(s => data.scenarios[s.id]);
   const right = answered.filter(s => data.scenarios[s.id].choice === s.answer).length;
   const pre = score(data.pretest), post = score(data.posttest);
-  const preTotal = data.pretest?.quizLength || 5, postTotal = data.posttest?.quizLength || 5;
+  const preTotal = data.pretest?.quizLength || PRETEST_QUIZ.length, postTotal = data.posttest?.quizLength || POSTTEST_QUIZ.length;
   const comparable = currentQuiz(data.pretest) && currentQuiz(data.posttest);
   const wrong = new Set();
   const t = data.posttest || data.pretest;
@@ -179,18 +274,20 @@ function dashboardView() {
     </section>
     <div class="dashboard-section-heading"><div><p class="eyebrow">At a glance</p><h2>Your progress</h2></div><span class="hint">A little progress adds up.</span></div>
     <div class="dashboard-stats">
-      <section class="stat-card"><span class="stat-icon" aria-hidden="true">01</span><p class="stat-label">Starting quiz</p><p class="big-num">${pre === null ? "—" : `${pre}<span> / ${preTotal}</span>`}</p><p class="hint">${pre === null ? "Ready when you are" : "Your starting point"}</p></section>
+      <section class="stat-card"><span class="stat-icon" aria-hidden="true">01</span><p class="stat-label">Starting quiz</p><p class="big-num">${pre === null ? "—" : `${pre}<span> / ${preTotal}</span>`}</p><p class="hint">${esc(attemptSummary("pretest"))}</p></section>
       <section class="stat-card"><span class="stat-icon" aria-hidden="true">02</span><p class="stat-label">Lessons</p><p class="big-num">${lessonsDone}<span> / ${LESSONS.length}</span></p><progress aria-label="Lessons completed" max="${LESSONS.length}" value="${lessonsDone}"></progress><p class="hint">${lessonsDone === LESSONS.length ? "All lessons complete" : "Build your cloud foundation"}</p></section>
       <section class="stat-card"><span class="stat-icon" aria-hidden="true">03</span><p class="stat-label">Scenarios</p><p class="big-num">${answered.length}<span> / ${SCENARIOS.length}</span></p><p class="hint">${right} answered correctly</p></section>
-      <section class="stat-card"><span class="stat-icon" aria-hidden="true">04</span><p class="stat-label">Final quiz</p><p class="big-num">${post === null ? "—" : `${post}<span> / ${postTotal}</span>`}</p><p class="hint">${post === null ? "Take it after practice" : "Your course result"}</p></section>
+      <section class="stat-card"><span class="stat-icon" aria-hidden="true">04</span><p class="stat-label">Final quiz</p><p class="big-num">${post === null ? "—" : `${post}<span> / ${postTotal}</span>`}</p><p class="hint">${esc(attemptSummary("posttest"))}</p></section>
     </div>
     ${pre !== null && post !== null ? comparable
-      ? `<section class="dashboard-panel comparison-panel"><div><p class="eyebrow">Your growth</p><h2>Before and after</h2><p>You scored ${pre} / ${PRETEST_QUIZ.length} before learning and ${post} / ${POSTTEST_QUIZ.length} after: <b>${post - pre >= 0 ? "+" : ""}${post - pre} question${Math.abs(post - pre) === 1 ? "" : "s"} (${post - pre >= 0 ? "+" : ""}${pct(post, POSTTEST_QUIZ.length) - pct(pre, PRETEST_QUIZ.length)} percentage points).</b></p></div>
+      ? `<section class="dashboard-panel comparison-panel"><div><p class="eyebrow">Your growth</p><h2>Before and after</h2><p>Comparing your latest pre-test (${pre} / ${PRETEST_QUIZ.length}) and latest post-test (${post} / ${POSTTEST_QUIZ.length}): <b>${post - pre >= 0 ? "+" : ""}${post - pre} question${Math.abs(post - pre) === 1 ? "" : "s"} (${post - pre >= 0 ? "+" : ""}${pct(post, POSTTEST_QUIZ.length) - pct(pre, PRETEST_QUIZ.length)} percentage points).</b></p></div>
         <ul class="topic-results">${PRETEST_QUIZ.map((q, i) => {
           const before = data.pretest.answers[i] === q.answer, after = data.posttest.answers[i] === POSTTEST_QUIZ[i].answer;
           return `<li><span>${esc(q.conceptLabel)}</span><span class="topic-change ${after ? "topic-correct" : ""}">${before ? "✓" : "–"} <span aria-hidden="true">→</span> ${after ? "✓" : "–"}</span></li>`;
         }).join("")}</ul></section>`
       : `<section class="dashboard-panel"><p class="eyebrow">Your growth</p><h2>Before and after</h2><p>Both scores are saved, but they use different quiz versions, so a direct comparison would not be reliable. Use the current-version pre-test and post-test links to create a matched comparison; earlier scores are preserved.</p></section>` : ""}
+    <section class="dashboard-panel retake-panel"><div><p class="eyebrow">Keep practicing</p><h2>Take a new assessment</h2><p class="hint">Every attempt is saved. Your latest score is compared with your previous attempt, and your latest pre-test and post-test are compared above.</p></div><div class="retake-actions"><a class="btn" href="#/pretest/current">Take a new pre-test</a><a class="btn" href="#/posttest/current">Take a new post-test</a></div></section>
+    ${attemptHistoryHTML()}
     <section class="dashboard-panel review-panel"><div><p class="eyebrow">Keep building</p><h2>Worth reviewing</h2><p class="hint">Topics to revisit from your quizzes and practice.</p></div>${wrong.size ? `<ul>${[...wrong].map(c => `<li>${esc(c)}</li>`).join("")}</ul>` : `<p>${t || answered.length ? "Nothing flagged right now. Nice work." : "Topics you miss will show up here."}</p>`}</section>
   </section>`);
 }
@@ -215,7 +312,7 @@ async function adminView() {
     list.innerHTML = records.map(({ id, value }) => {
       const lessonCount = LESSONS.filter(l => value.lessons?.[l.id]?.done).length;
       const scenarioCount = SCENARIOS.filter(s => value.scenarios?.[s.id]).length;
-      const preTotal = value.pretest?.quizLength || 5, postTotal = value.posttest?.quizLength || 5;
+      const preTotal = value.pretest?.quizLength || PRETEST_QUIZ.length, postTotal = value.posttest?.quizLength || POSTTEST_QUIZ.length;
       return `<details class="admin-record"><summary><span class="admin-learner">${esc(value.email || "Email not recorded")}<small>${esc(id)}</small></span><span>Pre-test <b>${value.pretest ? `${esc(value.pretest.score)} / ${preTotal}` : "—"}</b></span><span>Post-test <b>${value.posttest ? `${esc(value.posttest.score)} / ${postTotal}` : "—"}</b></span><span>Lessons <b>${lessonCount} / ${LESSONS.length}</b></span><span>Scenarios <b>${scenarioCount} / ${SCENARIOS.length}</b></span></summary><pre>${esc(JSON.stringify(value, null, 2))}</pre></details>`;
     }).join("");
   } catch (error) {
@@ -301,9 +398,11 @@ function landscapeView() {
 function testView(kind, refresh = false) {
   const post = kind === "posttest", t = refresh ? null : data[kind], title = post ? "Post-test" : "Pre-test", quiz = quizFor(kind);
   if (t) {
-    const oldVersion = !currentQuiz(t), previousTotal = t.quizLength || 5;
+    const oldVersion = !currentQuiz(t), previousTotal = t.quizLength || quiz.length;
+    const changeMessage = attemptChangeMessage(kind);
     return view(`<h1>${title} result</h1><p class="big-num">${t.score} / ${oldVersion ? previousTotal : quiz.length}</p>
-      ${post && data.pretest ? `<p class="lede">Your pre-test score was ${data.pretest.score} / ${data.pretest.quizLength || 5}.</p>` : ""}
+      ${changeMessage ? `<p class="lede">${esc(changeMessage)}</p>` : ""}
+      ${post && data.pretest ? `<p class="lede">Your latest pre-test score was ${data.pretest.score} / ${data.pretest.quizLength || PRETEST_QUIZ.length}.</p>` : ""}
       ${oldVersion
         ? `<p class="lede">This result was recorded with an earlier version of the course, so its question-by-question explanations are no longer available. The saved score is preserved.</p><a class="btn" href="#/${kind}/current">Take the current ${title.toLowerCase()} (keep this earlier score)</a>`
         : `<p class="lede">${post ? "Here is your feedback for each question." : "This is your starting point. Feedback is shown now, after the starting score has been recorded."}</p>
@@ -311,7 +410,7 @@ function testView(kind, refresh = false) {
             const correct = t.answers[i] === q.answer, picked = t.answers[i];
             return `<section class="card"><h2>${i + 1}. ${esc(q.q)}</h2><p class="fb ${correct ? "ok" : "bad"}"><b>${correct ? "Correct." : "Not quite."}</b> ${picked === null || picked === undefined ? "No answer selected. " : correct ? `Answer: ${esc(q.options[q.answer])}. ` : `Your answer: ${esc(q.options[picked])}. ${esc(q.miss || "")} Correct answer: ${esc(q.options[q.answer])}. `}<b>Why:</b> ${esc(q.why)}</p></section>`;
           }).join("")}`}
-      <a class="btn" href="${post ? "#/reflection" : "#/lesson"}">${post ? "Write your reflection" : "Start the lessons"}</a>`);
+      <div class="retake-actions"><a class="btn" href="${post ? "#/reflection" : "#/lesson"}">${post ? "Write your reflection" : "Start the lessons"}</a><a class="btn secondary-btn" href="#/${kind}/current">Take a new ${post ? "post" : "pre"}-test</a><a class="text-link" href="#/dashboard">Back to dashboard</a></div>`);
   }
   view(`<h1>${title}</h1><p class="lede">${post ? "This matched quiz covers the same topics as the pre-test with different questions. Submit all answers to see explanations; this keeps feedback from influencing your remaining answers." : "Eight quick questions show what you know before the lessons. Guessing is fine. Submit all answers to see explanations, so feedback does not affect your starting-point score."}</p>
     <details class="source-note"><summary>How these questions were written and sourced</summary><p>${esc(QUESTION_METHOD)}</p><ul class="source-list">${sourceLinksHTML()}</ul></details>
@@ -323,11 +422,18 @@ function testView(kind, refresh = false) {
     const answers = quiz.map((_, i) => { const r = e.target.querySelector(`input[name="q${i}"]:checked`); return r ? +r.value : null; });
     if (answers.includes(null)) { const er = $("#err"); er.hidden = false; er.textContent = "Answer every question before submitting."; return; }
     const sc = answers.filter((a, i) => a === quiz[i].answer).length;
-    const patch = { [kind]: { score: sc, answers, quizVersion: QUIZ_VERSION, quizLength: quiz.length, at: Date.now() } };
-    const previous = data[kind], historyKey = `${kind}History`;
-    if (previous && !currentQuiz(previous)) patch[historyKey] = [...(data[historyKey] || []), previous];
-    await save(patch);
-    testView(kind);
+    const previousAttempt = attemptsFor(kind)[0];
+    const attempt = { score: sc, answers, quizVersion: QUIZ_VERSION, quizLength: quiz.length, at: Math.max(Date.now(), Number(previousAttempt?.at || 0) + 1) };
+    const submit = e.target.querySelector("button");
+    submit.disabled = true;
+    submit.textContent = "Saving…";
+    try {
+      await saveQuizAttempt(kind, attempt);
+      testView(kind);
+    } catch {
+      submit.disabled = false;
+      submit.textContent = `Submit ${title.toLowerCase()}`;
+    }
   });
 }
 
@@ -363,6 +469,7 @@ else {
     user = u;
     isAdmin = false;
     data = blank();
+    quizAttempts = [];
     if (u) {
       try { await load(); }
       catch (error) {

@@ -15,11 +15,13 @@ If you only want to use the hosted course, you do not need to create a Firebase 
 1. In the [Firebase console](https://console.firebase.google.com/), create a project.
 2. Go to **Build → Authentication → Get started → Sign-in method** and enable **Email/Password**.
 3. Go to **Build → Firestore Database → Create database**. Choose production mode and a region suitable for your users.
-4. In **Firestore Database → Rules**, publish the rules from [`firestore.rules`](./firestore.rules). The rules restrict learner records to their owners and allow only explicitly enabled admins to read all learner records.
+4. In **Firestore Database → Rules**, publish the rules from [`firestore.rules`](./firestore.rules). The rules restrict learner records and quiz attempts to their owners and allow explicitly enabled admins to read them.
 5. Go to **Project settings → Your apps**, register a Web app, and copy its Firebase web configuration into [`firebase-config.js`](./firebase-config.js), replacing the example project's configuration.
 6. In **Authentication → Settings → Authorized domains**, add `localhost` for local testing and `YOUR-GITHUB-USERNAME.github.io` for GitHub Pages. Add only the domains where you will host the site.
 
 The Firebase web configuration identifies the web app and is expected to be present in browser code. Never put service-account credentials, private keys, or user passwords in this repository. Firestore rules are essential: do not make the database publicly readable or writable.
+
+Publishing `firestore.rules` to GitHub does not update Firebase. After changing rules, copy the file contents into **Firestore Database → Rules** in the Firebase console and click **Publish**. The retake feature requires the current rules to allow learners to create and read their own quiz-attempt records.
 
 ## Run and test locally
 
@@ -37,7 +39,7 @@ python3 -m http.server 8001
 
 Then open <http://localhost:8001>. Do not open `index.html` directly from the file system; the browser needs an HTTP server to load JavaScript modules.
 
-Test account creation and sign-in, lesson/scenario feedback, quiz submission, and progress persistence. Use separate test learner accounts when checking that one learner cannot see another learner's data.
+Test account creation and sign-in, lesson/scenario feedback, quiz submission and retakes, attempt history, and progress persistence. Use separate test learner accounts when checking that one learner cannot see another learner's data.
 ## Publish your copy with GitHub Pages
 
 1. Create a GitHub repository, for example `cloud-basics`.
@@ -101,10 +103,11 @@ Create two test learner accounts and submit different work in each. Sign out bet
 - Edit quiz, lesson, scenario, and reflection content in [`content.js`](./content.js). The UI and dashboard flows are in [`app.js`](./app.js).
 - The course introduces Infrastructure as a Service (IaaS), Platform as a Service (PaaS), Software as a Service (SaaS), and public, private, hybrid, and multi-cloud.
 - Lesson and scenario checks provide immediate feedback. Pre-test and post-test explanations appear after the whole test is submitted, preserving the initial assessment baseline.
-- The pre-test and post-test use matched topics and compare results only when both attempts use the current quiz version. Earlier-version results are retained but are not compared with the current version.
+- Learners can retake the pre-test and post-test as often as they like. Each submission is saved as a separate `users/{uid}/quizAttempts/{attemptId}` document; the dashboard shows up to the latest 20 attempts and compares each test's latest score with its previous attempt. All saved attempts are retained; the dashboard loads up to the 100 most recent for history and comparison.
+- The dashboard's before-and-after comparison uses the latest pre-test and post-test and is shown only when both use the current quiz version. Earlier-version results are retained but are not compared with the current version.
 - The signed-in **Cloud landscape** tab provides illustrative vendor and product examples. It is not an exhaustive directory or a market-share ranking.
 - Lesson and scenario pages include references. The course also links to NIST SP 800-145 and primary cloud-provider documentation where I referenced.
 
 ## Data model
 
-Each learner's `users/{uid}` document can contain pre-test and post-test scores and answers, lesson completion, scenario responses, reflection text and ratings, and timestamps. The project owner (Myself) can inspect or export records in Firebase **Firestore Database → Data → users**. Handle exported records as sensitive data.
+Each learner's `users/{uid}` document contains the latest pre-test and post-test results, lesson completion, scenario responses, reflection text and ratings, and timestamps. Every quiz submission is preserved separately under `users/{uid}/quizAttempts`. The project owner can inspect or export records in Firebase **Firestore Database → Data → users** and each learner's `quizAttempts` subcollection. Handle exported records as sensitive data.

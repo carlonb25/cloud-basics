@@ -10,6 +10,12 @@ service cloud.firestore {
     match /users/{uid} {
       allow read: if request.auth != null && (request.auth.uid == uid || isAdmin());
       allow create, update, delete: if request.auth != null && request.auth.uid == uid;
+
+      match /quizAttempts/{attemptId} {
+        allow read: if request.auth != null && (request.auth.uid == uid || isAdmin());
+        allow create: if request.auth != null && request.auth.uid == uid;
+        allow update, delete: if false;
+      }
     }
 
     // Admin grants are managed by the project owner in the Firebase console.
