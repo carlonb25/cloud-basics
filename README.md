@@ -6,7 +6,7 @@ An introductory cloud-computing course project for CS-6460 Educational Technolog
 
 Visit **[Cloud-Computing Concepts, Made Clear](https://carlonb25.github.io/cloud-basics/)** to open the course. Create an account with your email address, and sign in. After account creation, Firebase signs you in automatically and the site opens your dashboard.
 
-Each learner can read and update only their own progress. Do not share your password. Course records can include quiz answers, scores, and written reflections. Before creating an account, note that the project owner and enabled admins may review stored course records; avoid entering sensitive personal details.
+Each learner can read and update only their own progress. Do not share your password. Course records can include quiz answers, scores, and written reflections. Before creating an account, note that the project owner and enabled admins may review stored course records; avoid entering sensitive personal details. The site includes a **Privacy** page with more detail about stored data, access, and retention.
 
 ## Set up Firebase for your own copy
 
@@ -108,8 +108,10 @@ For class testing with participants, follow your instructor's directions for vol
 - Learners can retake the pre-test and post-test as often as they like. Each submission is saved as a separate `users/{uid}/quizAttempts/{attemptId}` document; the dashboard shows up to the latest 20 attempts and compares each test's latest score with its previous attempt. All saved attempts are retained; the dashboard loads up to the 100 most recent for history and comparison.
 - The pre-test and post-test pair questions by alignment ID, use identical topic labels and matched introductory difficulty, and compare results only when both attempts use the current quiz version. The current assessment pair is version 4; older scores remain saved but are not compared with the new version.
 - The dashboard journey shows Before, During, Practice, After, and Reflection. Topics flagged under **Worth reviewing** link directly to the relevant lesson section.
+- The dashboard's **Up next** action links to the next incomplete step in the learning path. Lesson completion is saved by lesson; the site does not currently bookmark a position within an unfinished lesson.
 - Scenario reasoning is saved with each response. Learners identify the deciding clue and receive model reasoning to compare with their own.
-- The dashboard's before-and-after comparison uses the latest pre-test and post-test and is shown only when both use the current quiz version.
+- The dashboard's before-and-after comparison uses the latest pre-test and post-test and is shown only when both use the current quiz version. Its interpretation note explains that the short matched quizzes are a snapshot, not a validated test or grade, and that an observed score change alone does not establish that the course caused it.
+- The **Privacy** page describes the data stored in Firebase, who may access it under the published Firestore rules, retention, and how to contact the project owner about data removal. It is a project transparency notice, not a formal legal privacy policy.
 - The signed-in **Cloud landscape** tab provides illustrative vendor and product examples. It is not an exhaustive directory or a market-share ranking.
 - Lesson and scenario pages include references. The course also links to NIST SP 800-145 and primary cloud-provider documentation where I referenced.
 

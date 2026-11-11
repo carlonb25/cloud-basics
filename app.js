@@ -171,7 +171,7 @@ function header() {
   const h = location.hash || "#/";
   const link = (href, text) => `<a href="${href}" ${h.startsWith(href) ? 'aria-current="page"' : ""}>${text}</a>`;
   $("#top").innerHTML = user ? `<div class="bar"><a class="brand" href="#/">Cloud Basics</a>
-    <nav aria-label="Main">${link("#/dashboard", "Dashboard")}${link("#/pretest", "Pre-test")}${link("#/lesson", "Lessons")}${link("#/scenarios", "Scenarios")}${link("#/posttest", "Post-test")}${link("#/landscape", "Cloud landscape")}${link("#/reflection", "Reflection")}${isAdmin ? link("#/admin", "Admin") : ""}</nav>
+    <nav aria-label="Main">${link("#/dashboard", "Dashboard")}${link("#/pretest", "Pre-test")}${link("#/lesson", "Lessons")}${link("#/scenarios", "Scenarios")}${link("#/posttest", "Post-test")}${link("#/landscape", "Cloud landscape")}${link("#/reflection", "Reflection")}${link("#/privacy", "Privacy")}${isAdmin ? link("#/admin", "Admin") : ""}</nav>
     <button class="ghost" id="out">Sign out</button></div>` : `<div class="bar"><span class="brand">Cloud Basics</span></div>`;
   $("#out")?.addEventListener("click", () => signOut(auth));
 }
@@ -230,7 +230,6 @@ function authView(mode = "signin") {
     <form id="auth" class="auth-card" novalidate>
       <h2>${up ? "Create your account" : "Sign in to continue"}</h2>
       <p class="hint">${up ? "Save your learning progress and return anytime." : "Your lessons and progress are saved to your account."}</p>
-    ${up ? `<aside class="privacy-note"><h3>How your data is used</h3><p>Your email, course progress, quiz answers, and reflections are stored in the course Firebase project so you can see your progress. The project owner and enabled admins may review these records. Avoid including sensitive personal details. If you are testing this course for a class, follow your instructor's guidance about voluntary participation and data handling.</p></aside>` : ""}
     ${configured ? "" : `<p class="fb bad">Firebase is not configured yet. Add your keys to firebase-config.js.</p>`}
     <label>Email address<input type="email" name="email" autocomplete="email" placeholder="you@example.com" required></label>
     <label>Password<input type="password" name="pw" autocomplete="${up ? "new-password" : "current-password"}" minlength="6" placeholder="${up ? "At least 6 characters" : "Enter your password"}" required></label>
@@ -238,7 +237,7 @@ function authView(mode = "signin") {
     <button class="btn auth-submit">${up ? "Create account" : "Sign in"} <span aria-hidden="true">→</span></button>
     <p class="auth-alt">${up ? `Already have an account? <a href="#/signin">Sign in</a>` : `New to Cloud Basics? <a href="#/signup">Create an account</a>`}</p>
     ${up ? "" : `<p class="auth-reset"><a href="#" id="reset">Forgot your password?</a></p>`}
-    <p class="auth-footnote">Free, self-paced learning · Progress saved securely</p>
+    <p class="auth-footnote">Free, self-paced learning · Progress saved securely · <a href="#/privacy">Privacy &amp; data use</a></p>
     </form>
     <footer class="auth-credit"><span>Final Project · CS6460</span><span aria-hidden="true">·</span><span>Created by <strong>Carlon Brown</strong></span><span aria-hidden="true">·</span><a href="mailto:cbrown420@gatech.edu">cbrown420@gatech.edu</a></footer>
   </section>`);
@@ -322,7 +321,7 @@ function dashboardView() {
       return `<li class="journey-step ${step.complete ? "complete" : ""} ${active ? "current" : ""}"><a href="${step.href}" ${active ? 'aria-current="step"' : ""}><span class="journey-marker" aria-hidden="true">${step.complete ? "✓" : index + 1}</span><span>${step.label}</span>${active ? `<small>${step.complete ? "Completed" : "Current step"}</small>` : ""}</a></li>`;
     }).join("")}</ol></nav>
     <section class="dashboard-next">
-      <div class="next-copy"><p class="eyebrow">${n ? "Up next" : "Course complete"}</p><h2>${n ? "Keep your momentum going." : "You made it through the course."}</h2><p>${n ? "Pick up where you left off on your cloud learning path." : "Review your progress and see how your understanding changed."}</p></div>
+      <div class="next-copy"><p class="eyebrow">${n ? "Up next" : "Course complete"}</p><h2>${n ? "Your next step is ready." : "You made it through the course."}</h2><p>${n ? "Continue from the next incomplete activity in your learning path." : "Review your progress and see how your understanding changed."}</p></div>
       ${n ? `<a class="btn dashboard-cta" href="${n.href}">${esc(n.label)} <span aria-hidden="true">→</span></a>` : `<span class="tag done">All activities complete</span>`}
     </section>
     <div class="dashboard-section-heading"><div><p class="eyebrow">At a glance</p><h2>Your progress</h2></div><span class="hint">A little progress adds up.</span></div>
@@ -334,16 +333,29 @@ function dashboardView() {
     </div>
     ${pre !== null && post !== null ? comparable
       ? `<section class="dashboard-panel comparison-panel"><div><p class="eyebrow">Your growth</p><h2>Before and after</h2><p>Comparing your latest pre-test (${pre} / ${PRETEST_QUIZ.length}) and latest post-test (${post} / ${POSTTEST_QUIZ.length}): <b>${post - pre >= 0 ? "+" : ""}${post - pre} question${Math.abs(post - pre) === 1 ? "" : "s"} (${post - pre >= 0 ? "+" : ""}${pct(post, POSTTEST_QUIZ.length) - pct(pre, PRETEST_QUIZ.length)} percentage points).</b></p></div>
-        <ul class="topic-results">${QUIZ_PAIRS.map(pair => {
+        <div><ul class="topic-results">${QUIZ_PAIRS.map(pair => {
           const before = data.pretest.answers[pair.pretestIndex] === pair.pretest.answer;
           const after = data.posttest.answers[pair.posttestIndex] === pair.posttest.answer;
           return `<li><span>${esc(pair.conceptLabel)}</span><span class="topic-change ${after ? "topic-correct" : ""}">${before ? "✓" : "–"} <span aria-hidden="true">→</span> ${after ? "✓" : "–"}</span></li>`;
-        }).join("")}</ul></section>`
+        }).join("")}</ul><details class="comparison-explainer"><summary>How to interpret this comparison</summary><p>The quizzes cover the same topics at matched introductory difficulty, but use different questions. This eight-question comparison is a small snapshot, not a validated test or a grade. A score change shows a difference in these attempts; it cannot by itself prove the course caused that change. Guessing, timing, and retakes can affect results.</p><p>This compares your latest pre-test with your latest post-test, which may not have been taken in that order. For a fresh before-and-after comparison, take a new pre-test first, then a new post-test.</p></details></div></section>`
       : `<section class="dashboard-panel"><p class="eyebrow">Your growth</p><h2>Before and after</h2><p>Both scores are saved, but they use different quiz versions, so a direct comparison would not be reliable. Use the current-version pre-test and post-test links to create a matched comparison; earlier scores are preserved.</p></section>` : ""}
     <section class="dashboard-panel retake-panel"><div><p class="eyebrow">Keep practicing</p><h2>Take a new assessment</h2><p class="hint">Every attempt is saved. Your latest score is compared with your previous attempt, and your latest pre-test and post-test are compared above.</p></div><div class="retake-actions"><a class="btn" href="#/pretest/current">Take a new pre-test</a><a class="btn" href="#/posttest/current">Take a new post-test</a></div></section>
     ${attemptHistoryHTML()}
-    <section class="dashboard-panel review-panel"><div><p class="eyebrow">Keep building</p><h2>Worth reviewing</h2><p class="hint">Select a topic to jump to the relevant lesson section.</p></div>${wrong.size ? `<ul>${[...wrong.values()].map(({ label, target }) => `<li><a href="#/lesson/${target[0]}/section/${target[1]}">${esc(label)} <span aria-hidden="true">↗</span></a></li>`).join("")}</ul>` : `<p>${t || answered.length ? "Nothing flagged right now. Nice work." : "Topics you miss will show up here."}</p>`}</section>
+    <section class="dashboard-panel review-panel"><div><p class="eyebrow">Keep building</p><h2>Worth reviewing</h2><p class="hint">${wrong.size ? "Choose a topic to reopen its lesson section." : "Topics you miss on a quiz or scenario will appear here as links to the lesson."}</p></div>${wrong.size ? `<ul>${[...wrong.values()].map(({ label, target }) => `<li><a href="#/lesson/${target[0]}/section/${target[1]}" aria-label="Review ${esc(label)} in its lesson section"><span>${esc(label)}</span><span class="review-link-action">Review lesson <span aria-hidden="true">→</span></span></a></li>`).join("")}</ul>` : `<p>${t || answered.length ? "Nothing flagged right now. Nice work." : "Topics you miss will show up here."}</p>`}</section>
   </section>`);
+}
+
+function privacyView() {
+  view(`<article class="privacy-page">
+    <p class="eyebrow">Cloud Basics · Data use</p>
+    <h1>Privacy and course data</h1>
+    <p class="lede">This page explains what this learning project stores and who may access it. It is a project transparency notice, not a formal legal privacy policy.</p>
+    <section class="dashboard-panel"><h2>What is stored</h2><p>Firebase Authentication manages your sign-in account. The course does not store your password in its Firestore progress records. Firestore may store your email, latest pre-test and post-test scores and answers, assessment attempt history, lesson completion, scenario choices and written reasoning, reflection text and ratings, and timestamps.</p></section>
+    <section class="dashboard-panel"><h2>Who can access your course records</h2><p>The application is designed so a signed-in learner can read their own progress. When the rules in <code>firestore.rules</code> are published to the Firebase project, enabled admins can also read learner records for course administration; other learners are denied access by those rules. The project owner manages the Firebase project and admin access.</p></section>
+    <section class="dashboard-panel"><h2>Retention and sensitive information</h2><p>Course records are retained in the Firebase project until the project owner removes them. The site does not currently provide a self-service download or delete control. Avoid entering sensitive personal details in answers or reflections. For a class activity, follow your instructor's guidance on voluntary participation and data handling.</p></section>
+    <section class="dashboard-panel"><h2>Questions or a data-removal request?</h2><p>Contact the project owner at <a href="mailto:cbrown420@gatech.edu">cbrown420@gatech.edu</a>. Do not send your password or include sensitive information in email.</p></section>
+    <div class="retake-actions">${user ? `<a class="btn" href="#/dashboard">Back to dashboard</a>` : `<a class="btn" href="#/signup">Create an account</a><a class="text-link" href="#/signin">Sign in</a>`}</div>
+  </article>`);
 }
 
 async function adminView() {
@@ -389,7 +401,7 @@ function lessonView(id, sectionId = null) {
   const st = data.lessons[id] || {}, i = LESSONS.indexOf(L), nxt = LESSONS[i + 1];
   view(`<article class="lesson"><h1>${esc(L.title)}</h1><p class="hint">About ${L.minutes} minutes</p>${referencesHTML(L.sourceIds, "Lesson content is original instructional writing based on these references.")}${L.objectives?.length ? `<section class="card"><h2>By the end, you can</h2><ul>${L.objectives.map(o => `<li>${esc(o)}</li>`).join("")}</ul></section>` : ""}${L.body.map(b => b.stack
     ? `<div class="explorer"><p class="hint">Compare who manages each layer. Gold indicates customer-managed work; blue indicates provider-managed work.</p><div role="tablist" aria-label="Service model">${["IaaS", "PaaS", "SaaS"].map((m, k) => `<button type="button" role="tab" class="seg" id="tab-${m}" data-m="${m}" aria-controls="stackview" aria-selected="${k === 0}" tabindex="${k === 0 ? 0 : -1}">${m}</button>`).join("")}</div><div id="stackview" role="tabpanel" tabindex="0" aria-labelledby="tab-IaaS"></div><p id="stacknote"></p></div>`
-    : `<h2 id="${lessonSectionId(b.h)}">${esc(b.h)}</h2><p>${esc(b.p)}</p>`).join("")}
+    : `<h2 id="${lessonSectionId(b.h)}" tabindex="-1">${esc(b.h)}</h2><p>${esc(b.p)}</p>`).join("")}
     <section class="card check"><h2>Check your understanding</h2><div id="chk"></div></section>
     <div class="row"><a href="#/lesson">All lessons</a>${nxt ? `<a class="btn" href="#/lesson/${nxt.id}">Next lesson</a>` : `<a class="btn" href="#/scenarios">Go to scenarios</a>`}</div></article>`);
   const draw = m => {
@@ -418,7 +430,15 @@ function lessonView(id, sectionId = null) {
       };
     });
   }
-  if (sectionId) requestAnimationFrame(() => document.getElementById(sectionId)?.scrollIntoView({ block: "start" }));
+  if (sectionId) requestAnimationFrame(() => {
+    const section = document.getElementById(sectionId);
+    if (!section) return;
+    section.focus({ preventScroll: true });
+    section.scrollIntoView({
+      block: "start",
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth"
+    });
+  });
   mcq($("#chk"), id, L.check, st.check, (c, ok) => save({ lessons: { [id]: { done: ok, check: { choice: c, correct: ok } } } }));
 }
 
@@ -535,9 +555,9 @@ function reflectionView() {
 /* ---------- router ---------- */
 function route() {
   header();
-  if (!user) return authView(location.hash === "#/signup" ? "signup" : "signin");
+  if (!user) return location.hash === "#/privacy" ? privacyView() : authView(location.hash === "#/signup" ? "signup" : "signin");
   const [, p, id, sectionType, sectionId] = (location.hash || "#/dashboard").split("/");
-  ({ dashboard: dashboardView, admin: adminView, landscape: landscapeView, pretest: () => testView("pretest", id === "current"), posttest: () => testView("posttest", id === "current"), scenarios: scenariosView, reflection: reflectionView,
+  ({ dashboard: dashboardView, admin: adminView, landscape: landscapeView, privacy: privacyView, pretest: () => testView("pretest", id === "current"), posttest: () => testView("posttest", id === "current"), scenarios: scenariosView, reflection: reflectionView,
     lesson: () => id ? lessonView(id, sectionType === "section" ? sectionId : null) : lessonIndex() }[p] || dashboardView)();
 }
 
