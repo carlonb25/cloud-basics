@@ -2,7 +2,7 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/fireba
 import { getAuth, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp, collection, getDocs, query, orderBy, limit, writeBatch } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
 import { firebaseConfig } from "./firebase-config.js";
-import { STACK, PRETEST_QUIZ, POSTTEST_QUIZ, QUIZ_VERSION, LESSONS, SCENARIOS, REFLECTION_PROMPTS, CLOUD_LANDSCAPE, COURSE_SOURCES, QUESTION_METHOD } from "./content.js";
+import { STACK, PRETEST_QUIZ, POSTTEST_QUIZ, QUIZ_PAIRS, QUIZ_VERSION, LESSONS, SCENARIOS, REFLECTION_PROMPTS, CLOUD_LANDSCAPE, COURSE_SOURCES, QUESTION_METHOD } from "./content.js";
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -140,6 +140,21 @@ const COURSE_TOPICS = [
   { id: "security", label: "Security basics", description: "Build foundational habits for cloud accounts and data, including managing identities, limiting access, and understanding provider-versus-customer responsibilities." },
   { id: "cost", label: "Cost awareness", description: "Learn why cloud usage can grow into a bill and how to think about unused resources, capacity, budgets, and monitoring." }
 ];
+const REVIEW_TARGETS = {
+  "cloud-basics": ["what-is-cloud", "computing-as-a-service"],
+  iaas: ["service-models", "iaas-control-over-virtual-infrastructure"],
+  paas: ["service-models", "paas-focus-on-your-application"],
+  saas: ["service-models", "saas-use-a-finished-application"],
+  public: ["deployment-models", "public-cloud"],
+  private: ["deployment-models", "private-cloud"],
+  hybrid: ["deployment-models", "hybrid-cloud"],
+  "shared-responsibility": ["cloud-decisions", "security-is-shared"],
+  "Service models": ["service-models", "one-stack-different-responsibility-lines"],
+  "Deployment models": ["deployment-models", "choose-based-on-requirements"],
+  "Cloud fundamentals": ["what-is-cloud", "computing-as-a-service"],
+  "Cloud decisions": ["cloud-decisions", "keep-an-eye-on-cost"]
+};
+const lessonSectionId = heading => heading.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const nextStep = () => {
   if (!data.pretest) return { href: "#/pretest", label: "Take the 8-question pre-test" };
   if (!currentQuiz(data.pretest)) return { href: "#/pretest/current", label: "Update your pre-test" };
@@ -173,23 +188,31 @@ function mcq(el, id, q, saved, cb, opts = {}) {
   const name = `q-${id}`;
   el.innerHTML = `<fieldset><legend>${esc(q.q || q.text)}</legend>${q.options.map((o, i) =>
     `<label class="opt"><input type="radio" name="${name}" value="${i}" ${saved && saved.choice === i ? "checked" : ""}><span>${esc(o)}</span></label>`).join("")}</fieldset>
-    ${opts.reason ? `<label class="reason">Why did you choose that? <span class="hint">(one or two sentences)</span><textarea rows="2">${esc(saved?.reasoning || "")}</textarea></label>` : ""}
+    ${opts.reason ? `<label class="reason">Which clue in the scenario decided it? <span class="hint">(explain in at least four words)</span><textarea rows="2" aria-describedby="reason-help-${id}">${esc(saved?.reasoning || "")}</textarea><span class="hint" id="reason-help-${id}">Your reasoning is saved with this scenario answer.</span></label>` : ""}
     <button class="btn">${saved ? "Check again" : "Check answer"}</button><div class="fb" aria-live="polite"></div>`;
   const fb = el.querySelector(".fb");
-  const show = (c, correct) => {
+  const show = (c, correct, reason = "") => {
     fb.className = "fb " + (correct ? "ok" : "bad");
-    fb.innerHTML = correct
+    fb.innerHTML = (correct
       ? `<b>Correct.</b> ${esc(q.options[q.answer])} is the best answer. <b>Why:</b> ${esc(q.why)}`
-      : `<b>Not quite.</b> You chose ${esc(q.options[c])}. ${esc(q.miss || "")} The best answer is ${esc(q.options[q.answer])}. <b>Why:</b> ${esc(q.why)}`;
+      : `<b>Not quite.</b> You chose ${esc(q.options[c])}. ${esc(q.miss || "")} The best answer is ${esc(q.options[q.answer])}. <b>Why:</b> ${esc(q.why)}`)
+      + (opts.reason ? `<p><b>Your reasoning:</b> ${esc(reason || "No reasoning entered.")}</p><p><b>Model reasoning:</b> ${esc(q.modelReasoning || q.why)}</p>` : "");
   };
-  if (saved) show(saved.choice, saved.choice === q.answer);
+  if (saved) show(saved.choice, saved.choice === q.answer, saved.reasoning || "");
   el.querySelector("button").addEventListener("click", async e => {
     const sel = el.querySelector(`input[name="${name}"]:checked`);
     if (!sel) { fb.className = "fb bad"; fb.textContent = "Select an answer first."; return; }
+    const reason = el.querySelector("textarea")?.value.trim() || "";
+    if (opts.reason && reason.split(/\s+/).filter(Boolean).length < 4) {
+      fb.className = "fb bad";
+      fb.textContent = "Add at least four words explaining which scenario clue led to your answer.";
+      el.querySelector("textarea").focus();
+      return;
+    }
     const c = +sel.value, correct = c === q.answer;
-    show(c, correct);
+    show(c, correct, reason);
     e.target.disabled = true;
-    try { await cb(c, correct, el.querySelector("textarea")?.value.trim() || ""); } finally { e.target.disabled = false; e.target.textContent = "Check again"; }
+    try { await cb(c, correct, reason); } finally { e.target.disabled = false; e.target.textContent = "Check again"; }
   });
 }
 
@@ -207,6 +230,7 @@ function authView(mode = "signin") {
     <form id="auth" class="auth-card" novalidate>
       <h2>${up ? "Create your account" : "Sign in to continue"}</h2>
       <p class="hint">${up ? "Save your learning progress and return anytime." : "Your lessons and progress are saved to your account."}</p>
+    ${up ? `<aside class="privacy-note"><h3>How your data is used</h3><p>Your email, course progress, quiz answers, and reflections are stored in the course Firebase project so you can see your progress. The project owner and enabled admins may review these records. Avoid including sensitive personal details. If you are testing this course for a class, follow your instructor's guidance about voluntary participation and data handling.</p></aside>` : ""}
     ${configured ? "" : `<p class="fb bad">Firebase is not configured yet. Add your keys to firebase-config.js.</p>`}
     <label>Email address<input type="email" name="email" autocomplete="email" placeholder="you@example.com" required></label>
     <label>Password<input type="password" name="pw" autocomplete="${up ? "new-password" : "current-password"}" minlength="6" placeholder="${up ? "At least 6 characters" : "Enter your password"}" required></label>
@@ -254,20 +278,49 @@ function dashboardView() {
   const pre = score(data.pretest), post = score(data.posttest);
   const preTotal = data.pretest?.quizLength || PRETEST_QUIZ.length, postTotal = data.posttest?.quizLength || POSTTEST_QUIZ.length;
   const comparable = currentQuiz(data.pretest) && currentQuiz(data.posttest);
-  const wrong = new Set();
-  const t = data.posttest || data.pretest;
-  const reviewQuiz = data.posttest && currentQuiz(data.posttest) ? POSTTEST_QUIZ : PRETEST_QUIZ;
-  if (t && currentQuiz(t)) reviewQuiz.forEach((q, i) => { if (t.answers[i] !== q.answer) wrong.add(q.conceptLabel); });
-  SCENARIOS.forEach(s => { const a = data.scenarios[s.id]; if (a && a.choice !== s.answer) wrong.add(s.concept); });
+  const wrong = new Map();
+  const flagForReview = (concept, label) => {
+    const target = REVIEW_TARGETS[concept];
+    if (target) wrong.set(`${target[0]}:${target[1]}`, { label, target });
+  };
+  const reviewAttempt = [...attemptsFor("pretest"), ...attemptsFor("posttest")]
+    .filter(attempt => currentQuiz(attempt))
+    .sort((a, b) => Number(b.at || 0) - Number(a.at || 0))[0];
+  const t = reviewAttempt || data.posttest || data.pretest;
+  if (reviewAttempt) {
+    const quiz = quizFor(reviewAttempt.kind);
+    quiz.forEach((question, index) => {
+      if (reviewAttempt.answers[index] !== question.answer) flagForReview(question.concept, question.conceptLabel);
+    });
+  }
+  SCENARIOS.forEach(s => {
+    const a = data.scenarios[s.id];
+    if (a && a.choice !== s.answer) flagForReview(s.concept, s.concept);
+  });
   const n = nextStep();
   const stepsDone = Number(currentQuiz(data.pretest)) + lessonsDone + answered.length + Number(currentQuiz(data.posttest)) + Number(Boolean(data.reflection));
   const stepsTotal = LESSONS.length + SCENARIOS.length + 3;
   const progress = pct(stepsDone, stepsTotal);
+  const journeyCurrent = !currentQuiz(data.pretest) ? 0
+    : lessonsDone < LESSONS.length ? 1
+      : answered.length < SCENARIOS.length ? 2
+        : !currentQuiz(data.posttest) ? 3 : 4;
+  const journey = [
+    { label: "Before", href: "#/pretest", complete: currentQuiz(data.pretest) },
+    { label: "During", href: "#/lesson", complete: lessonsDone === LESSONS.length },
+    { label: "Practice", href: "#/scenarios", complete: answered.length === SCENARIOS.length },
+    { label: "After", href: "#/posttest", complete: currentQuiz(data.posttest) },
+    { label: "Reflection", href: "#/reflection", complete: Boolean(data.reflection) }
+  ];
   view(`<section class="dashboard-page">
     <div class="dashboard-welcome">
       <div><p class="eyebrow">Your learning space</p><h1>Welcome back</h1><p class="dashboard-email">${esc(user.email)} <span>·</span> Your progress saves automatically</p></div>
       <div class="dashboard-progress"><div class="row"><span>Course progress</span><b>${progress}%</b></div><progress aria-label="Course progress" max="${stepsTotal}" value="${stepsDone}"></progress><span class="hint">${stepsDone} of ${stepsTotal} activities complete</span></div>
     </div>
+    <nav class="learning-journey" aria-label="Learning journey"><ol>${journey.map((step, index) => {
+      const active = index === journeyCurrent;
+      return `<li class="journey-step ${step.complete ? "complete" : ""} ${active ? "current" : ""}"><a href="${step.href}" ${active ? 'aria-current="step"' : ""}><span class="journey-marker" aria-hidden="true">${step.complete ? "✓" : index + 1}</span><span>${step.label}</span>${active ? `<small>${step.complete ? "Completed" : "Current step"}</small>` : ""}</a></li>`;
+    }).join("")}</ol></nav>
     <section class="dashboard-next">
       <div class="next-copy"><p class="eyebrow">${n ? "Up next" : "Course complete"}</p><h2>${n ? "Keep your momentum going." : "You made it through the course."}</h2><p>${n ? "Pick up where you left off on your cloud learning path." : "Review your progress and see how your understanding changed."}</p></div>
       ${n ? `<a class="btn dashboard-cta" href="${n.href}">${esc(n.label)} <span aria-hidden="true">→</span></a>` : `<span class="tag done">All activities complete</span>`}
@@ -281,14 +334,15 @@ function dashboardView() {
     </div>
     ${pre !== null && post !== null ? comparable
       ? `<section class="dashboard-panel comparison-panel"><div><p class="eyebrow">Your growth</p><h2>Before and after</h2><p>Comparing your latest pre-test (${pre} / ${PRETEST_QUIZ.length}) and latest post-test (${post} / ${POSTTEST_QUIZ.length}): <b>${post - pre >= 0 ? "+" : ""}${post - pre} question${Math.abs(post - pre) === 1 ? "" : "s"} (${post - pre >= 0 ? "+" : ""}${pct(post, POSTTEST_QUIZ.length) - pct(pre, PRETEST_QUIZ.length)} percentage points).</b></p></div>
-        <ul class="topic-results">${PRETEST_QUIZ.map((q, i) => {
-          const before = data.pretest.answers[i] === q.answer, after = data.posttest.answers[i] === POSTTEST_QUIZ[i].answer;
-          return `<li><span>${esc(q.conceptLabel)}</span><span class="topic-change ${after ? "topic-correct" : ""}">${before ? "✓" : "–"} <span aria-hidden="true">→</span> ${after ? "✓" : "–"}</span></li>`;
+        <ul class="topic-results">${QUIZ_PAIRS.map(pair => {
+          const before = data.pretest.answers[pair.pretestIndex] === pair.pretest.answer;
+          const after = data.posttest.answers[pair.posttestIndex] === pair.posttest.answer;
+          return `<li><span>${esc(pair.conceptLabel)}</span><span class="topic-change ${after ? "topic-correct" : ""}">${before ? "✓" : "–"} <span aria-hidden="true">→</span> ${after ? "✓" : "–"}</span></li>`;
         }).join("")}</ul></section>`
       : `<section class="dashboard-panel"><p class="eyebrow">Your growth</p><h2>Before and after</h2><p>Both scores are saved, but they use different quiz versions, so a direct comparison would not be reliable. Use the current-version pre-test and post-test links to create a matched comparison; earlier scores are preserved.</p></section>` : ""}
     <section class="dashboard-panel retake-panel"><div><p class="eyebrow">Keep practicing</p><h2>Take a new assessment</h2><p class="hint">Every attempt is saved. Your latest score is compared with your previous attempt, and your latest pre-test and post-test are compared above.</p></div><div class="retake-actions"><a class="btn" href="#/pretest/current">Take a new pre-test</a><a class="btn" href="#/posttest/current">Take a new post-test</a></div></section>
     ${attemptHistoryHTML()}
-    <section class="dashboard-panel review-panel"><div><p class="eyebrow">Keep building</p><h2>Worth reviewing</h2><p class="hint">Topics to revisit from your quizzes and practice.</p></div>${wrong.size ? `<ul>${[...wrong].map(c => `<li>${esc(c)}</li>`).join("")}</ul>` : `<p>${t || answered.length ? "Nothing flagged right now. Nice work." : "Topics you miss will show up here."}</p>`}</section>
+    <section class="dashboard-panel review-panel"><div><p class="eyebrow">Keep building</p><h2>Worth reviewing</h2><p class="hint">Select a topic to jump to the relevant lesson section.</p></div>${wrong.size ? `<ul>${[...wrong.values()].map(({ label, target }) => `<li><a href="#/lesson/${target[0]}/section/${target[1]}">${esc(label)} <span aria-hidden="true">↗</span></a></li>`).join("")}</ul>` : `<p>${t || answered.length ? "Nothing flagged right now. Nice work." : "Topics you miss will show up here."}</p>`}</section>
   </section>`);
 }
 
@@ -330,16 +384,41 @@ function lessonIndex() {
     `<li class="card row"><div><h2><a href="#/lesson/${l.id}">${esc(l.title)}</a></h2><p class="hint">About ${l.minutes} minutes</p></div><span class="tag ${data.lessons[l.id]?.done ? "done" : ""}">${data.lessons[l.id]?.done ? "Complete" : "Not started"}</span></li>`).join("")}</ol>`);
 }
 
-function lessonView(id) {
+function lessonView(id, sectionId = null) {
   const L = LESSONS.find(l => l.id === id); if (!L) return lessonIndex();
   const st = data.lessons[id] || {}, i = LESSONS.indexOf(L), nxt = LESSONS[i + 1];
   view(`<article class="lesson"><h1>${esc(L.title)}</h1><p class="hint">About ${L.minutes} minutes</p>${referencesHTML(L.sourceIds, "Lesson content is original instructional writing based on these references.")}${L.objectives?.length ? `<section class="card"><h2>By the end, you can</h2><ul>${L.objectives.map(o => `<li>${esc(o)}</li>`).join("")}</ul></section>` : ""}${L.body.map(b => b.stack
-    ? `<div class="explorer"><div role="tablist" aria-label="Service model">${["IaaS", "PaaS", "SaaS"].map((m, k) => `<button role="tab" class="seg" data-m="${m}" aria-selected="${k === 0}">${m}</button>`).join("")}</div><div id="stackview"></div><p id="stacknote"></p></div>`
-    : `<h2>${esc(b.h)}</h2><p>${esc(b.p)}</p>`).join("")}
+    ? `<div class="explorer"><p class="hint">Compare who manages each layer. Gold indicates customer-managed work; blue indicates provider-managed work.</p><div role="tablist" aria-label="Service model">${["IaaS", "PaaS", "SaaS"].map((m, k) => `<button type="button" role="tab" class="seg" id="tab-${m}" data-m="${m}" aria-controls="stackview" aria-selected="${k === 0}" tabindex="${k === 0 ? 0 : -1}">${m}</button>`).join("")}</div><div id="stackview" role="tabpanel" tabindex="0" aria-labelledby="tab-IaaS"></div><p id="stacknote"></p></div>`
+    : `<h2 id="${lessonSectionId(b.h)}">${esc(b.h)}</h2><p>${esc(b.p)}</p>`).join("")}
     <section class="card check"><h2>Check your understanding</h2><div id="chk"></div></section>
     <div class="row"><a href="#/lesson">All lessons</a>${nxt ? `<a class="btn" href="#/lesson/${nxt.id}">Next lesson</a>` : `<a class="btn" href="#/scenarios">Go to scenarios</a>`}</div></article>`);
-  const draw = m => { $("#stackview").innerHTML = stackHTML(m); $("#stacknote").textContent = STACK.notes[m]; document.querySelectorAll(".seg").forEach(b => b.setAttribute("aria-selected", b.dataset.m === m)); };
-  if ($(".seg")) { draw("IaaS"); document.querySelectorAll(".seg").forEach(b => b.onclick = () => draw(b.dataset.m)); }
+  const draw = m => {
+    $("#stackview").innerHTML = stackHTML(m);
+    $("#stackview").setAttribute("aria-labelledby", `tab-${m}`);
+    $("#stacknote").textContent = STACK.notes[m];
+    document.querySelectorAll(".seg").forEach(button => {
+      const selected = button.dataset.m === m;
+      button.setAttribute("aria-selected", selected);
+      button.tabIndex = selected ? 0 : -1;
+    });
+  };
+  if ($(".seg")) {
+    draw("IaaS");
+    const tabs = [...document.querySelectorAll(".seg")];
+    tabs.forEach((button, index) => {
+      button.onclick = () => draw(button.dataset.m);
+      button.onkeydown = event => {
+        const nextIndex = event.key === "ArrowRight" ? (index + 1) % tabs.length
+          : event.key === "ArrowLeft" ? (index - 1 + tabs.length) % tabs.length
+            : event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : -1;
+        if (nextIndex < 0) return;
+        event.preventDefault();
+        tabs[nextIndex].focus();
+        draw(tabs[nextIndex].dataset.m);
+      };
+    });
+  }
+  if (sectionId) requestAnimationFrame(() => document.getElementById(sectionId)?.scrollIntoView({ block: "start" }));
   mcq($("#chk"), id, L.check, st.check, (c, ok) => save({ lessons: { [id]: { done: ok, check: { choice: c, correct: ok } } } }));
 }
 
@@ -414,7 +493,7 @@ function testView(kind, refresh = false) {
   }
   view(`<h1>${title}</h1><p class="lede">${post ? "This matched quiz covers the same topics as the pre-test with different questions. Submit all answers to see explanations; this keeps feedback from influencing your remaining answers." : "Eight quick questions show what you know before the lessons. Guessing is fine. Submit all answers to see explanations, so feedback does not affect your starting-point score."}</p>
     <details class="source-note"><summary>How these questions were written and sourced</summary><p>${esc(QUESTION_METHOD)}</p><ul class="source-list">${sourceLinksHTML()}</ul></details>
-    <form id="test">${quiz.map((q, i) => `<fieldset class="card"><legend>${i + 1}. ${esc(q.q)}</legend>${q.options.map((o, k) =>
+    <form id="test">${quiz.map((q, i) => `<fieldset class="card"><legend>${i + 1}. ${esc(q.q)}</legend><p class="question-topic">Topic: ${esc(q.conceptLabel)}</p>${q.options.map((o, k) =>
       `<label class="opt"><input type="radio" name="q${i}" value="${k}"><span>${esc(o)}</span></label>`).join("")}</fieldset>`).join("")}
       <div class="fb bad" id="err" hidden></div><button class="btn">Submit ${title.toLowerCase()}</button></form>`);
   $("#test").addEventListener("submit", async e => {
@@ -457,9 +536,9 @@ function reflectionView() {
 function route() {
   header();
   if (!user) return authView(location.hash === "#/signup" ? "signup" : "signin");
-  const [, p, id] = (location.hash || "#/dashboard").split("/");
+  const [, p, id, sectionType, sectionId] = (location.hash || "#/dashboard").split("/");
   ({ dashboard: dashboardView, admin: adminView, landscape: landscapeView, pretest: () => testView("pretest", id === "current"), posttest: () => testView("posttest", id === "current"), scenarios: scenariosView, reflection: reflectionView,
-    lesson: () => id ? lessonView(id) : lessonIndex() }[p] || dashboardView)();
+    lesson: () => id ? lessonView(id, sectionType === "section" ? sectionId : null) : lessonIndex() }[p] || dashboardView)();
 }
 
 if (!configured) { route(); }

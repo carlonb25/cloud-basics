@@ -6,7 +6,7 @@ An introductory cloud-computing course project for CS-6460 Educational Technolog
 
 Visit **[Cloud-Computing Concepts, Made Clear](https://carlonb25.github.io/cloud-basics/)** to open the course. Create an account with your email address, and sign in. After account creation, Firebase signs you in automatically and the site opens your dashboard.
 
-Each learner can read and update only their own progress. Do not share your password. Course records can include quiz answers, scores, and written reflections.
+Each learner can read and update only their own progress. Do not share your password. Course records can include quiz answers, scores, and written reflections. Before creating an account, note that the project owner and enabled admins may review stored course records; avoid entering sensitive personal details.
 
 ## Set up Firebase for your own copy
 
@@ -96,7 +96,9 @@ Admins can read learner records, which may contain personally identifiable infor
 
 ### Verify account separation
 
-Create two test learner accounts and submit different work in each. Sign out between accounts. Confirm that each learner sees only their own dashboard and has no **Admin** tab. Then sign in as an enabled admin and confirm that the admin overview can see both records. Do not use a real learner's account or share passwords while testing.
+Create two test learner accounts and submit different work in each. Sign out between accounts. Confirm each learner sees only their own dashboard, quiz-attempt history, and no **Admin** tab. Then sign in as an enabled admin and confirm that the admin overview can see both learner records. Do not use a real learner's account or share passwords while testing.
+
+For class testing with participants, follow your instructor's directions for voluntary participation, what data to collect, and how to handle it. This project notice is for transparency and is not a substitute for any course-required consent or review process.
 
 ## Course content and results
 
@@ -104,7 +106,10 @@ Create two test learner accounts and submit different work in each. Sign out bet
 - The course introduces Infrastructure as a Service (IaaS), Platform as a Service (PaaS), Software as a Service (SaaS), and public, private, hybrid, and multi-cloud.
 - Lesson and scenario checks provide immediate feedback. Pre-test and post-test explanations appear after the whole test is submitted, preserving the initial assessment baseline.
 - Learners can retake the pre-test and post-test as often as they like. Each submission is saved as a separate `users/{uid}/quizAttempts/{attemptId}` document; the dashboard shows up to the latest 20 attempts and compares each test's latest score with its previous attempt. All saved attempts are retained; the dashboard loads up to the 100 most recent for history and comparison.
-- The dashboard's before-and-after comparison uses the latest pre-test and post-test and is shown only when both use the current quiz version. Earlier-version results are retained but are not compared with the current version.
+- The pre-test and post-test pair questions by alignment ID, use identical topic labels and matched introductory difficulty, and compare results only when both attempts use the current quiz version. The current assessment pair is version 4; older scores remain saved but are not compared with the new version.
+- The dashboard journey shows Before, During, Practice, After, and Reflection. Topics flagged under **Worth reviewing** link directly to the relevant lesson section.
+- Scenario reasoning is saved with each response. Learners identify the deciding clue and receive model reasoning to compare with their own.
+- The dashboard's before-and-after comparison uses the latest pre-test and post-test and is shown only when both use the current quiz version.
 - The signed-in **Cloud landscape** tab provides illustrative vendor and product examples. It is not an exhaustive directory or a market-share ranking.
 - Lesson and scenario pages include references. The course also links to NIST SP 800-145 and primary cloud-provider documentation where I referenced.
 

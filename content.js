@@ -1,4 +1,4 @@
-export const QUIZ_VERSION = 3;
+export const QUIZ_VERSION = 4;
 
 export const STACK = {
   layers: ["Applications", "Data", "Runtime", "Middleware", "Operating system", "Virtualization", "Servers", "Storage", "Networking"],
@@ -74,9 +74,25 @@ export const COURSE_SOURCES = [
   }
 ];
 
-export const QUESTION_METHOD = "Questions in this course are original introductory practice items written to check whether learners can recognize and apply core cloud concepts. The pre-test and post-test use different examples aligned to the same topics. Definitions are grounded primarily in NIST SP 800-145 and cross-checked with the linked provider documentation; distractors are designed to represent common confusions, such as mixing service models with deployment models. This is educational material, not a certification exam.";
+export const QUESTION_METHOD = "Questions in this course are original introductory practice items written to check whether learners can recognize and apply core cloud concepts. Each pre-test item is explicitly paired with a post-test item using the same topic label and introductory difficulty, while changing the example and wording. Definitions are grounded primarily in NIST SP 800-145 and cross-checked with the linked provider documentation; distractors represent common confusions, such as mixing service models with deployment models. This is educational material, not a certification exam.";
 
-const PRETEST_QUIZ = [
+const QUIZ_DIFFICULTY = {
+  "cloud-basics": "recognize",
+  iaas: "apply",
+  paas: "apply",
+  saas: "apply",
+  public: "recognize",
+  private: "recognize",
+  hybrid: "recognize",
+  "shared-responsibility": "apply"
+};
+const alignQuiz = questions => questions.map(question => ({
+  ...question,
+  alignmentId: question.concept,
+  difficulty: QUIZ_DIFFICULTY[question.concept]
+}));
+
+const PRETEST_QUESTIONS = [
   {
     concept: "cloud-basics", conceptLabel: "Cloud fundamentals",
     q: "A team can get computing resources when needed, use them over a network, and pay based on use instead of buying servers first. What are they using?",
@@ -128,19 +144,19 @@ const PRETEST_QUIZ = [
   },
   {
     concept: "shared-responsibility", conceptLabel: "Shared responsibility",
-    q: "Which statement about cloud security responsibility is most accurate?",
+    q: "An arts group subscribes to hosted project software. Which security task remains with its staff?",
     options: [
-      "The provider is responsible for every security task in every cloud service.",
-      "The customer is responsible for every layer, including provider-owned hardware.",
-      "Responsibilities are shared, and the customer's tasks depend partly on the service model.",
-      "Using a public cloud removes the need to manage access to accounts and data."
-    ], answer: 2,
-    miss: "Cloud providers and customers have different security duties. Customers do not manage the provider's physical hardware, but they still manage identities, access, and data.",
-    why: "The provider secures the cloud infrastructure, while customers retain responsibilities such as identities, access, and data. The exact division changes between IaaS, PaaS, and SaaS."
+      "Replace the provider's physical disks.",
+      "Manage which staff can sign in and access the group's information.",
+      "Patch the provider's data-center network.",
+      "Maintain the application's source code for the vendor."
+    ], answer: 1,
+    miss: "The provider operates the hosted software and its infrastructure, but the group still controls its people and their access to information.",
+    why: "Even with Software as a Service (SaaS), customers manage identities, access, and their data. The provider handles the application's underlying infrastructure."
   }
 ];
 
-const POSTTEST_QUIZ = [
+const POSTTEST_QUESTIONS = [
   {
     concept: "cloud-basics", conceptLabel: "Cloud fundamentals",
     q: "A small business can add storage in minutes and pay for the capacity it uses rather than purchasing a storage system up front. Which idea does this illustrate?",
@@ -204,7 +220,29 @@ const POSTTEST_QUIZ = [
   }
 ];
 
-export { PRETEST_QUIZ, POSTTEST_QUIZ };
+const alignedPretest = alignQuiz(PRETEST_QUESTIONS);
+const alignedPosttest = alignQuiz(POSTTEST_QUESTIONS);
+export const QUIZ_PAIRS = alignedPretest.map((pretest, pretestIndex) => {
+  const posttest = alignedPosttest.find(question => question.alignmentId === pretest.alignmentId);
+  if (!posttest || pretest.conceptLabel !== posttest.conceptLabel || pretest.difficulty !== posttest.difficulty) {
+    throw new Error(`Pre/post quiz alignment is missing or inconsistent for ${pretest.alignmentId}.`);
+  }
+  return {
+    alignmentId: pretest.alignmentId,
+    conceptLabel: pretest.conceptLabel,
+    difficulty: pretest.difficulty,
+    pretest,
+    posttest,
+    pretestIndex,
+    posttestIndex: alignedPosttest.indexOf(posttest)
+  };
+});
+if (QUIZ_PAIRS.length !== alignedPosttest.length) {
+  throw new Error("Pre/post quizzes must contain the same set of aligned topics.");
+}
+
+export const PRETEST_QUIZ = alignedPretest;
+export const POSTTEST_QUIZ = alignedPosttest;
 
 export const LESSONS = [
   {
@@ -300,49 +338,57 @@ export const SCENARIOS = [
     id: "s1", concept: "Service models", text: "A small team has its own web application code. It wants to deploy often, but does not have staff to patch operating systems or manage servers.",
     options: ["Infrastructure as a Service (IaaS)", "Platform as a Service (PaaS)", "Software as a Service (SaaS)"], answer: 1,
     miss: "Separate the team's need to build its own application from its wish not to operate the underlying platform.",
-    why: "Platform as a Service (PaaS) lets the team deploy its application while the provider manages the operating system, runtime, and infrastructure."
+    why: "Platform as a Service (PaaS) lets the team deploy its application while the provider manages the operating system, runtime, and infrastructure.",
+    modelReasoning: "The team owns application code, but does not want to manage servers or operating systems. That points to a managed application platform."
   },
   {
     id: "s2", concept: "Service models", text: "A company must run an older program that needs a specific operating-system version and custom machine settings.",
     options: ["Infrastructure as a Service (IaaS)", "Platform as a Service (PaaS)", "Software as a Service (SaaS)"], answer: 0,
     miss: "The key requirement is control over the virtual machine's operating system.",
-    why: "Infrastructure as a Service (IaaS) provides virtual machines that the company can configure and maintain. It also means the company takes on more operating work."
+    why: "Infrastructure as a Service (IaaS) provides virtual machines that the company can configure and maintain. It also means the company takes on more operating work.",
+    modelReasoning: "The specific operating-system version and machine settings require virtual-machine control. IaaS provides that control."
   },
   {
     id: "s3", concept: "Service models", text: "A community organization needs hosted email and shared calendars. It wants to configure users but not build or maintain the software.",
     options: ["Infrastructure as a Service (IaaS)", "Platform as a Service (PaaS)", "Software as a Service (SaaS)"], answer: 2,
     miss: "They want to use a finished application rather than deploy their own code.",
-    why: "Software as a Service (SaaS) provides ready-to-use software operated by the provider. The organization still manages users, settings, and its information."
+    why: "Software as a Service (SaaS) provides ready-to-use software operated by the provider. The organization still manages users, settings, and its information.",
+    modelReasoning: "The organization wants finished email and calendar software, not to build an application or manage its servers. That is SaaS."
   },
   {
     id: "s4", concept: "Deployment models", text: "A bank has a dedicated private cloud for one system and connects it to public-cloud services used by another part of the business.",
     options: ["Public cloud", "Private cloud", "Hybrid cloud", "Multi-cloud only"], answer: 2,
     miss: "Look for the combination and connection of private and public environments.",
-    why: "Hybrid cloud combines private and public environments. Multi-cloud refers to using multiple providers and does not necessarily include a private cloud."
+    why: "Hybrid cloud combines private and public environments. Multi-cloud refers to using multiple providers and does not necessarily include a private cloud.",
+    modelReasoning: "The bank connects a private environment with public-cloud services. The private-plus-public combination is the defining hybrid-cloud clue."
   },
   {
     id: "s5", concept: "Deployment models", text: "A retailer uses two different public-cloud providers for separate services. It has no private cloud.",
     options: ["Public cloud only", "Private cloud", "Hybrid cloud", "Multi-cloud"], answer: 3,
     miss: "The clue is the use of more than one provider, with no private environment.",
-    why: "Using services from multiple providers is multi-cloud. Hybrid cloud specifically combines private and public environments."
+    why: "Using services from multiple providers is multi-cloud. Hybrid cloud specifically combines private and public environments.",
+    modelReasoning: "The retailer uses two providers and has no private environment. Multiple providers indicate multi-cloud, not hybrid cloud."
   },
   {
     id: "s6", concept: "Cloud fundamentals", text: "A research team wants to experiment this afternoon without buying hardware. It can increase or reduce its computing capacity as its experiment changes.",
     options: ["Cloud computing", "Private cloud is required", "Software as a Service (SaaS) only", "A fixed-capacity server room"], answer: 0,
     miss: "Look for on-demand access and flexible capacity without an upfront hardware purchase.",
-    why: "Cloud services can provide on-demand resources that teams can scale to fit changing workloads."
+    why: "Cloud services can provide on-demand resources that teams can scale to fit changing workloads.",
+    modelReasoning: "The team can provision resources without buying hardware and adjust capacity as needed. Those are cloud-computing characteristics."
   },
   {
     id: "s7", concept: "Shared responsibility", text: "A department subscribes to a cloud document application. Which task should it still plan to do?",
     options: ["Patch the provider's application servers", "Manage employee accounts and document access", "Maintain the provider's storage hardware", "Install the provider's operating system updates"], answer: 1,
     miss: "Even when the vendor operates the application, the customer remains responsible for its users and access choices.",
-    why: "With SaaS, the provider manages the application and infrastructure, but the department still manages its users, access, and information."
+    why: "With SaaS, the provider manages the application and infrastructure, but the department still manages its users, access, and information.",
+    modelReasoning: "The provider runs the document application, but the department decides who can sign in and access its documents."
   },
   {
     id: "s8", concept: "Cloud decisions", text: "A startup is comparing cloud options. Its monthly bill is growing because test machines remain on after experiments finish.",
     options: ["Move every workload to a private cloud immediately", "Review usage and shut down resources that are no longer needed", "Assume the provider will stop billing automatically", "Switch from Platform as a Service (PaaS) to Software as a Service (SaaS) regardless of requirements"], answer: 1,
     miss: "The problem is unused capacity, so start by examining resource usage and lifecycle.",
-    why: "Cloud usage is often metered. Reviewing resources, budgets, and alerts helps control costs; changing deployment models without assessing requirements may not solve the issue."
+    why: "Cloud usage is often metered. Reviewing resources, budgets, and alerts helps control costs; changing deployment models without assessing requirements may not solve the issue.",
+    modelReasoning: "The clue is that test machines remain on after use. Reviewing usage and shutting them down addresses the unnecessary cost."
   }
 ];
 
