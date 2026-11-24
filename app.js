@@ -484,8 +484,14 @@ async function adminView() {
 
       const reflection = value.reflection;
       const reflectionHTML = reflection
-        ? `<section class="admin-detail-section"><p class="eyebrow">Reflection</p><h2>Learner reflection</h2><p class="hint">Saved ${esc(formatDate(reflection.at))}</p><div class="reflection-grid"><div><h3>What they understand better</h3><p>${esc(reflection.learned || "Not answered")}</p></div><div><h3>What is still unclear</h3><p>${esc(reflection.confusing || "Not answered")}</p></div></div><ul class="reflection-ratings"><li>Clarity: <b>${esc(reflection.clarity || "—")} / 5</b></li><li>Feedback: <b>${esc(reflection.feedback || "—")} / 5</b></li><li>Navigation: <b>${esc(reflection.navigation || "—")} / 5</b></li><li>Dashboard: <b>${esc(reflection.dashboard || "—")} / 5</b></li></ul></section>`
-        : `<section class="admin-detail-section"><p class="eyebrow">Reflection</p><h2>No reflection saved</h2></section>`;
+        ? `<section class="admin-detail-section admin-reflection"><p class="eyebrow">Reflection</p><h2>Learner reflection</h2><p class="hint">Saved ${esc(formatDate(reflection.at))}</p><div class="reflection-grid"><div><h3>What they understand better</h3><p>${esc(reflection.learned || "Not answered")}</p></div><div><h3>What is still unclear</h3><p>${esc(reflection.confusing || "Not answered")}</p></div></div><ul class="reflection-ratings"><li>Clarity: <b>${esc(reflection.clarity || "—")} / 5</b></li><li>Feedback: <b>${esc(reflection.feedback || "—")} / 5</b></li><li>Navigation: <b>${esc(reflection.navigation || "—")} / 5</b></li><li>Dashboard: <b>${esc(reflection.dashboard || "—")} / 5</b></li></ul></section>`
+        : `<section class="admin-detail-section admin-reflection"><p class="eyebrow">Reflection</p><h2>No reflection saved</h2><p class="hint">This learner has not submitted the reflection form.</p></section>`;
+
+      const reflectionSummary = reflection
+        ? reflection.learned
+          ? `Saved · ${reflection.learned.slice(0, 72)}${reflection.learned.length > 72 ? "…" : ""}`
+          : "Saved · no text entered"
+        : "Not yet";
 
       const completedLessons = LESSONS.filter(l => value.lessons?.[l.id]?.done);
       const lessonHTML = LESSONS.map(l => {
@@ -501,9 +507,10 @@ async function adminView() {
           <span>Growth <b>${difference === null ? "—" : `${difference >= 0 ? "+" : ""}${difference}`}</b></span>
           <span>Lessons <b>${lessonCount} / ${LESSONS.length}</b></span>
           <span>Scenarios <b>${scenarioCount} / ${SCENARIOS.length}</b></span>
-          <span>Reflection <b>${reflection ? "Saved" : "Not yet"}</b></span>
+          <span>Reflection <b>${esc(reflectionSummary)}</b></span>
         </summary>
         <div class="admin-detail">
+          ${reflectionHTML}
           <section class="admin-detail-section admin-growth">
             <div><p class="eyebrow">Before and after</p><h2>${growthLabel}</h2>
               ${canCompare
@@ -526,7 +533,6 @@ async function adminView() {
               ? `<div class="attempt-table-wrap"><table><thead><tr><th>Scenario</th><th>Learner choice</th><th>Result</th><th>Reasoning</th></tr></thead><tbody>${scenarioRows}</tbody></table></div>`
               : `<p class="hint">No scenario answers saved yet.</p>`}
           </section>
-          ${reflectionHTML}
           <section class="admin-detail-section">
             <p class="eyebrow">Lessons</p><h2>${completedLessons.length} of ${LESSONS.length} completed</h2>
             <ul class="admin-lessons">${lessonHTML}</ul>

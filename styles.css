@@ -256,6 +256,8 @@ main{max-width:1180px;padding:1.4rem 1.25rem 4rem}
 .admin-detail-section h2{margin:.15rem 0 .65rem;font-size:1.15rem}
 .admin-detail-section h3{margin:.25rem 0;font-size:.92rem}
 .admin-detail-section p{margin:.35rem 0}
+.admin-reflection{background:#f2f7f4}
+.admin-reflection .reflection-grid>div{background:#fff}
 .admin-growth{display:grid;grid-template-columns:minmax(220px,.75fr) minmax(360px,1.25fr);gap:1.2rem}
 .admin-trends{display:flex;flex-wrap:wrap;gap:.5rem 1.2rem}
 .reflection-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.8rem}
