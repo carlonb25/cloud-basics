@@ -367,7 +367,21 @@ async function adminView() {
   view(`<section class="dashboard-page"><p class="eyebrow">Restricted area</p><h1>Admin learner overview</h1><p class="lede">Read-only view of learner records and progress. These records can contain personal reflections; only access them for authorized course administration.</p><p id="admin-status" class="hint" role="status">Loading learner records…</p><div id="admin-records"></div></section>`);
   try {
     const snapshot = await getDocs(collection(db, "users"));
-    const records = snapshot.docs.map(s => ({ id: s.id, value: s.data() }));
+    const records = await Promise.all(snapshot.docs.map(async s => {
+      const value = s.data();
+      let attempts = [];
+      try {
+        const attemptsSnap = await getDocs(query(
+          collection(db, "users", s.id, "quizAttempts"),
+          orderBy("at", "desc"),
+          limit(100)
+        ));
+        attempts = attemptsSnap.docs.map(attempt => ({ id: attempt.id, ...attempt.data() }));
+      } catch (error) {
+        console.error(`Could not load quiz attempts for ${s.id}.`, error);
+      }
+      return { id: s.id, value, attempts };
+    }));
     const list = $("#admin-records");
     if (!list) return;
     if (!records.length) {
@@ -375,11 +389,151 @@ async function adminView() {
       return;
     }
     $("#admin-status").textContent = `${records.length} learner record${records.length === 1 ? "" : "s"}`;
-    list.innerHTML = records.map(({ id, value }) => {
+    list.innerHTML = records.map(({ id, value, attempts }) => {
+      const timestampValue = at => {
+        if (at?.toMillis) return at.toMillis();
+        if (at?.seconds) return at.seconds * 1000;
+        return Number(at) || 0;
+      };
+      const formatDate = at => timestampValue(at)
+        ? new Date(timestampValue(at)).toLocaleString()
+        : "Date unavailable";
+      const legacyAttempts = kind => [
+        ...(Array.isArray(value[`${kind}History`]) ? value[`${kind}History`] : []),
+        ...(value[kind] ? [value[kind]] : [])
+      ].map((attempt, index) => ({ id: `legacy-${kind}-${index}`, ...attempt, kind }));
+      const allAttempts = [...attempts];
+      for (const kind of ["pretest", "posttest"]) {
+        for (const legacy of legacyAttempts(kind)) {
+          if (!allAttempts.some(attempt =>
+            attempt.kind === kind
+            && attempt.at && timestampValue(attempt.at) === timestampValue(legacy.at)
+            && attempt.score === legacy.score
+          )) allAttempts.push(legacy);
+        }
+      }
+      allAttempts.sort((a, b) => timestampValue(b.at) - timestampValue(a.at));
+
+      const groupedAttempts = kind => allAttempts
+        .filter(attempt => attempt.kind === kind)
+        .sort((a, b) => timestampValue(b.at) - timestampValue(a.at));
+      const latestPre = groupedAttempts("pretest")[0] || value.pretest;
+      const latestPost = groupedAttempts("posttest")[0] || value.posttest;
       const lessonCount = LESSONS.filter(l => value.lessons?.[l.id]?.done).length;
       const scenarioCount = SCENARIOS.filter(s => value.scenarios?.[s.id]).length;
-      const preTotal = value.pretest?.quizLength || PRETEST_QUIZ.length, postTotal = value.posttest?.quizLength || POSTTEST_QUIZ.length;
-      return `<details class="admin-record"><summary><span class="admin-learner">${esc(value.email || "Email not recorded")}<small>${esc(id)}</small></span><span>Pre-test <b>${value.pretest ? `${esc(value.pretest.score)} / ${preTotal}` : "—"}</b></span><span>Post-test <b>${value.posttest ? `${esc(value.posttest.score)} / ${postTotal}` : "—"}</b></span><span>Lessons <b>${lessonCount} / ${LESSONS.length}</b></span><span>Scenarios <b>${scenarioCount} / ${SCENARIOS.length}</b></span></summary><pre>${esc(JSON.stringify(value, null, 2))}</pre></details>`;
+      const preTotal = latestPre?.quizLength || PRETEST_QUIZ.length;
+      const postTotal = latestPost?.quizLength || POSTTEST_QUIZ.length;
+
+      const canCompare = latestPre?.quizVersion === QUIZ_VERSION
+        && latestPost?.quizVersion === QUIZ_VERSION
+        && Array.isArray(latestPre.answers)
+        && Array.isArray(latestPost.answers);
+      const difference = canCompare ? latestPost.score - latestPre.score : null;
+      const growthLabel = difference === null
+        ? "Comparison unavailable"
+        : difference > 0
+          ? `Improved by ${difference}`
+          : difference < 0
+            ? `Declined by ${Math.abs(difference)}`
+            : "No overall change";
+      const trendLabel = kind => {
+        const kindAttempts = groupedAttempts(kind);
+        if (kindAttempts.length < 2) return "Not enough attempts";
+        const latest = kindAttempts[0], previous = kindAttempts[1];
+        if (latest.quizVersion !== previous.quizVersion || latest.quizLength !== previous.quizLength) {
+          return "Different quiz versions";
+        }
+        const change = latest.score - previous.score;
+        if (change > 0) return `Improving (+${change})`;
+        if (change < 0) return `Declining (${change})`;
+        return "Holding steady";
+      };
+
+      const attemptRows = allAttempts.map((attempt, index) => {
+        const kindAttempts = groupedAttempts(attempt.kind);
+        const kindIndex = kindAttempts.indexOf(attempt);
+        const previous = kindAttempts[kindIndex + 1];
+        let change = "No prior loaded";
+        if (previous) {
+          const comparable = attempt.quizVersion === previous.quizVersion
+            && attempt.quizLength === previous.quizLength;
+          change = comparable
+            ? `${signedChange(attempt.score - previous.score)} vs. prior`
+            : "Version changed";
+        }
+        const label = attempt.kind === "pretest" ? "Pre-test" : "Post-test";
+        return `<tr><td>${label}</td><td>${esc(formatDate(attempt.at))}</td><td>${esc(attempt.score)} / ${esc(attempt.quizLength || 0)}</td><td>${esc(change)}</td></tr>`;
+      }).join("");
+
+      const topicRows = canCompare ? QUIZ_PAIRS.map(pair => {
+        const before = latestPre.answers[pair.pretestIndex] === pair.pretest.answer;
+        const after = latestPost.answers[pair.posttestIndex] === pair.posttest.answer;
+        let status = "Stayed incorrect";
+        if (!before && after) status = "Improved";
+        else if (before && after) status = "Stayed correct";
+        else if (before && !after) status = "Declined";
+        return `<tr><td>${esc(pair.conceptLabel)}</td><td>${before ? "Correct" : "Incorrect"}</td><td>${after ? "Correct" : "Incorrect"}</td><td><b>${status}</b></td></tr>`;
+      }).join("") : "";
+
+      const scenarioRows = SCENARIOS.map(scenario => {
+        const saved = value.scenarios?.[scenario.id];
+        if (!saved) return "";
+        const choice = Number.isInteger(saved.choice) ? scenario.options[saved.choice] : "No choice";
+        return `<tr><td>${esc(scenario.id)} · ${esc(scenario.concept)}</td><td>${esc(choice)}</td><td>${saved.correct ? "Correct" : "Incorrect"}</td><td>${esc(saved.reasoning || "No reasoning saved")}</td></tr>`;
+      }).filter(Boolean).join("");
+
+      const reflection = value.reflection;
+      const reflectionHTML = reflection
+        ? `<section class="admin-detail-section"><p class="eyebrow">Reflection</p><h2>Learner reflection</h2><p class="hint">Saved ${esc(formatDate(reflection.at))}</p><div class="reflection-grid"><div><h3>What they understand better</h3><p>${esc(reflection.learned || "Not answered")}</p></div><div><h3>What is still unclear</h3><p>${esc(reflection.confusing || "Not answered")}</p></div></div><ul class="reflection-ratings"><li>Clarity: <b>${esc(reflection.clarity || "—")} / 5</b></li><li>Feedback: <b>${esc(reflection.feedback || "—")} / 5</b></li><li>Navigation: <b>${esc(reflection.navigation || "—")} / 5</b></li><li>Dashboard: <b>${esc(reflection.dashboard || "—")} / 5</b></li></ul></section>`
+        : `<section class="admin-detail-section"><p class="eyebrow">Reflection</p><h2>No reflection saved</h2></section>`;
+
+      const completedLessons = LESSONS.filter(l => value.lessons?.[l.id]?.done);
+      const lessonHTML = LESSONS.map(l => {
+        const saved = value.lessons?.[l.id];
+        return `<li class="${saved?.done ? "done" : ""}"><span>${saved?.done ? "✓" : "–"}</span> ${esc(l.title)}</li>`;
+      }).join("");
+
+      return `<details class="admin-record">
+        <summary>
+          <span class="admin-learner">${esc(value.email || "Email not recorded")}<small>${esc(id)}</small></span>
+          <span>Pre-test <b>${latestPre ? `${esc(latestPre.score)} / ${preTotal}` : "—"}</b></span>
+          <span>Post-test <b>${latestPost ? `${esc(latestPost.score)} / ${postTotal}` : "—"}</b></span>
+          <span>Growth <b>${difference === null ? "—" : `${difference >= 0 ? "+" : ""}${difference}`}</b></span>
+          <span>Lessons <b>${lessonCount} / ${LESSONS.length}</b></span>
+          <span>Scenarios <b>${scenarioCount} / ${SCENARIOS.length}</b></span>
+          <span>Reflection <b>${reflection ? "Saved" : "Not yet"}</b></span>
+        </summary>
+        <div class="admin-detail">
+          <section class="admin-detail-section admin-growth">
+            <div><p class="eyebrow">Before and after</p><h2>${growthLabel}</h2>
+              ${canCompare
+                ? `<p>Latest pre-test: ${esc(latestPre.score)} / ${preTotal}. Latest post-test: ${esc(latestPost.score)} / ${postTotal}.</p>`
+                : `<p>Both current quizzes are needed for a reliable before-and-after comparison. Scores and previous quiz versions are preserved.</p>`}
+            </div>
+            ${topicRows ? `<div class="attempt-table-wrap"><table><thead><tr><th>Topic</th><th>Before</th><th>After</th><th>Change</th></tr></thead><tbody>${topicRows}</tbody></table></div>` : ""}
+          </section>
+          <section class="admin-detail-section">
+            <p class="eyebrow">Assessment trends</p>
+            <h2>Test attempts and improvement</h2>
+            <p class="admin-trends"><span>Pre-test: <b>${esc(trendLabel("pretest"))}</b></span><span>Post-test: <b>${esc(trendLabel("posttest"))}</b></span></p>
+            ${attemptRows
+              ? `<div class="attempt-table-wrap"><table><thead><tr><th>Test</th><th>Date</th><th>Score</th><th>Change</th></tr></thead><tbody>${attemptRows}</tbody></table></div>`
+              : `<p class="hint">No quiz attempts saved yet.</p>`}
+          </section>
+          <section class="admin-detail-section">
+            <p class="eyebrow">Scenario practice</p><h2>Choices and reasoning</h2>
+            ${scenarioRows
+              ? `<div class="attempt-table-wrap"><table><thead><tr><th>Scenario</th><th>Learner choice</th><th>Result</th><th>Reasoning</th></tr></thead><tbody>${scenarioRows}</tbody></table></div>`
+              : `<p class="hint">No scenario answers saved yet.</p>`}
+          </section>
+          ${reflectionHTML}
+          <section class="admin-detail-section">
+            <p class="eyebrow">Lessons</p><h2>${completedLessons.length} of ${LESSONS.length} completed</h2>
+            <ul class="admin-lessons">${lessonHTML}</ul>
+          </section>
+          <details class="admin-detail-section admin-raw"><summary>Saved learner record (JSON)</summary><pre>${esc(JSON.stringify(value, null, 2))}</pre></details>
+        </div>
+      </details>`;
     }).join("");
   } catch (error) {
     console.error("Could not load admin learner records.", error);
